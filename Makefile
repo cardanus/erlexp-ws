@@ -1,4 +1,4 @@
-PROJECT = erlexp_ws
+PROJECT = erlexp-ws
 # --------------------------------------------------------------------
 # Defining OTP version for this project which uses by kerl
 # --------------------------------------------------------------------
