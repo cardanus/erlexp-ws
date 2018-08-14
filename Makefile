@@ -20,9 +20,9 @@ TEST_ERLC_OPTS += +debug_info
 # --------------------------------------------------------------------
 
 dep_gun = git https://github.com/ninenines/gun              master
+dep_erlexp = git https://github.com/cardanus/erlexp			feature/integration-with-ws-transport
 dep_teaser = git https://github.com/spylik/teaser           develop (dev only)
 dep_sync = git https://github.com/rustyio/sync              master (dev only)
-dep_erlexp = git https://github.com/cardanus/erlexp			master
 
 DEPS = erlexp gun
 SHELL_DEPS = sync teaser
