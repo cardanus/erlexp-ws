@@ -1,4 +1,4 @@
-PROJECT = erlexp-ws
+PROJECT = erlexp_ws
 # --------------------------------------------------------------------
 # Defining OTP version for this project which uses by kerl
 # --------------------------------------------------------------------
@@ -36,10 +36,10 @@ ifeq ($(shell basename $(shell dirname $(shell dirname $(realpath $(lastword $(M
     DEPS_DIR ?= $(shell dirname $(CURDIR))
 endif
 
-SHELL_OPTS = -kernel shell_history enabled -pa ebin/ test/ -eval 'lager:start(), mlibs:discover()' -env ERL_LIBS deps -run mlibs autotest_on_compile
+SHELL_OPTS = -kernel shell_history enabled -pa ebin/ test/ -eval 'mlibs:discover()' -env ERL_LIBS deps -run mlibs autotest_on_compile
 
 # --------------------------------------------------------------------
 # We using erlang.mk 
 # --------------------------------------------------------------------
 
-include erlang.mk
+include $(if $(ERLANG_MK_FILENAME),$(ERLANG_MK_FILENAME),erlang.mk)

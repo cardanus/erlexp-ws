@@ -1,0 +1,11 @@
+{application, 'erlexp-ws', [
+    {description, "WS transport for Cardanus Erlang client"},
+    {vsn, "0.0.1"},
+    {id, "erlexp-ws"}, 
+    {modules, []},
+    {registered, ['erlexp-ws']},
+    {applications, [kernel, stdlib, gun]},
+    {included_applications, [erlexp]},
+    {mod, {'erlexp-ws_app', []}},
+    {env, []}
+]}.
