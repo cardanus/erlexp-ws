@@ -19,7 +19,7 @@ start_link() -> start_link(#{}).
 
 % @doc start root supervisor
 -spec start_link(Options) -> Result when
-    Options :: erlexp:start_options(),
+    Options :: 'erlexp-ws':start_options(),
     Result  :: 'ignore' | {'error',_} | {'ok',pid()}.
 
 start_link(Options) ->
@@ -27,21 +27,30 @@ start_link(Options) ->
 
 % @doc init callbacks
 -spec init(Options) -> Result when
-    Options :: erlexp:start_options(),
+    Options :: 'erlexp-ws':start_options(),
     Result  :: {ok, {SupFlags :: supervisor:sup_flags(), [ChildSpec :: supervisor:child_spec()]}}.
 
 init(Options) ->
     RestartStrategy = {one_for_one, 4, 3600},
 
-    ErlExp = {
-        erlexp,
-        {erlexp, start, [Options]},
+    ErlExpWs = {
+        'erlexp-ws',
+        {'erlexp-ws', start, [Options]},
         permanent,
         5000,
         worker,
-        [erlexp]
+        ['erlexp-ws']
+    }
+
+    ErlExp = {
+        erlexp,
+        {erlexp, start, [Options#{transport_module => 'erlexp_ws'}]},
+        permanent,
+        5000,
+        worker,
+        ['erlexp']
     },
 
-    Childrens = [ErlExp],
+    Childrens = [ErlExpWs, ErlExp],
 
     {ok, {RestartStrategy, Childrens}}.
