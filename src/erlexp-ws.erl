@@ -65,8 +65,13 @@ stop('async', Server) ->
     Result  :: {'ok', transport_state()}.
 
 init(Options) ->
-    Self = self(),
-    Timeout_before_ping = maps:get('timeout_before_ping', Options, 'from_remote'),
+    Heartbeat_freq = maps:get('heartbeat_freq', Options,
+        application:get_env(?MODULE, 'heartbeat_freq', 1000)
+    ),
+
+    Timeout_before_ping = maps:get('timeout_before_ping', Options,
+        application:get_env(?MODULE, 'timeout_before_ping', 'from_remote')
+    ),
 
     {TimeoutLastGlobalFrame, SetTimeoutBeforePing} = case Timeout_before_ping of
         'from_remote' ->
@@ -76,20 +81,26 @@ init(Options) ->
     end,
 
     State = may_need_connect(#transport_state{
-        'heartbeat_freq' = maps:get('heartbeat_freq', Options, 1000),
-        'timeout_for_gun_ws_upgrade' = maps:get('timeout_for_gun_ws_upgrade', Options, 10000),
-        'timeout_for_subscribtion' = maps:get('timeout_for_subscribtion', Options, 10000),
+        'heartbeat_freq' = Heartbeat_freq,
+        'timeout_for_gun_ws_upgrade' = maps:get('timeout_for_gun_ws_upgrade', Options,
+            application:get_env(?MODULE, 'timeout_for_gun_ws_upgrade', 10000)
+        ),
+        'timeout_for_subscribtion' = maps:get('timeout_for_subscribtion', Options,
+            application:get_env(?MODULE, 'timeout_for_subscribtion', 10000)
+        ),
         'timeout_before_ping' = Timeout_before_ping,
-        'timeout_for_ping' = maps:get('timeout_for_ping', Options, 30000),
+        'timeout_for_ping' = maps:get('timeout_for_ping', Options,
+            application:get_env(?MODULE, 'timeout_for_ping' 30000)
+        ),
         'timeout_last_global_frame' = TimeoutLastGlobalFrame,
         'timeout_before_ping_set' = SetTimeoutBeforePing
     }),
 
-    TRef = erlang:send_after(Heartbeat_freq, self(), 'heartbeat'),
-    {ok,
+    {'ok',
         State#transport_state{
-            heartbeat_tref = TRef
-        }}.
+            'heartbeat_tref' = erlang:send_after(Heartbeat_freq, self(), 'heartbeat')
+        }
+    }.
 
 %--------------handle_call-----------------
 
@@ -102,7 +113,7 @@ init(Options) ->
     Result  :: {reply, 'ok', State}.
 
 handle_call(Msg, _From, State) ->
-    error_logger:warning_msg("we are in undefined handle_call with message ~p\n",[Msg]),
+    ?warning("we are in undefined handle_call with message ~p\n",[Msg]),
     {reply, 'ok', State}.
 %-----------end of handle_call-------------
 
@@ -127,7 +138,7 @@ handle_cast('ping', State) ->
 
 % handle_cast for all other thigs
 handle_cast(Msg, State) ->
-    error_logger:warning_msg("we are in undefined handle_cast with message ~p\n",[Msg]),
+    ?warning("we are in undefined handle_cast with message ~p\n",[Msg]),
     {noreply, State}.
 %-----------end of handle_cast-------------
 
@@ -187,21 +198,6 @@ handle_info({'gun_ws', _ConnPid, {text, <<"{\"event\":\"pusher_internal:subscrip
 handle_info({'gun_ws', _ConnPid, {text, <<"{\"event\":\"pusher:pong\",\"data\":\"{}\"}">>}}, State) ->
     {noreply, State#transport_state{last_frame = get_time()}};
 
-% @doc pusher data frame
-handle_info({'gun_ws', _ConnPid, {text, Frame}}, State = #transport_state{
-        pusher_app_id = PusherAppId,
-        channels = Channels
-    }) ->
-    Time = get_time(),
-    [_, Channel] = binary:split(Frame,[<<"channel\":\"">>,<<"\"}">>],[global,trim]),
-    send_output(State, #erlpusher_frame{app_id = PusherAppId, channel = Channel, data = Frame}),
-    ChannelData = maps:get(Channel, Channels),
-    {noreply, State#transport_state{
-            last_frame=get_time(),
-            channels = Channels#{Channel := ChannelData#channel_prop{last_frame = Time}}
-        }
-    };
-
 %% ---- close and other events bringing gun to flush ---- %%
 
 % @doc gun_ws close
@@ -216,7 +212,7 @@ handle_info({'gun_ws', ConnPid, {'close', Code, _}}, State) ->
 
 % @doc gun_error
 handle_info({'gun_error', ConnPid, Reason}, State) ->
-    error_logger:error_msg("got gun_error for ConnPid ~p with reason: ~p",[ConnPid, Reason]),
+    ?error("got gun_error for ConnPid ~p with reason: ~p",[ConnPid, Reason]),
     {noreply, flush_gun(State, ConnPid)};
 
 % @doc gun_down
@@ -229,17 +225,17 @@ handle_info({'DOWN', _MonRef, 'process', ConnPid, 'normal'}, State) ->
 
 % @doc unexepted 'DOWN'
 handle_info({'DOWN', MonRef, 'process', ConnPid, Reason}, State) ->
-    error_logger:error_msg("got DOWN for ConnPid ~p, MonRef ~p with Reason: ~p",[ConnPid, MonRef, Reason]),
+    ?info("got DOWN for ConnPid ~p, MonRef ~p with Reason: ~p",[ConnPid, MonRef, Reason]),
     {noreply, flush_gun(State, ConnPid)};
 
 % @doc unknown gun_ws frame
 handle_info({'gun_ws', _ConnPid, Frame}, State) ->
-    error_logger:warning_msg("got non-text gun_ws event with Frame ~p", [Frame]),
+    ?warning("got non-text gun_ws event with Frame ~p", [Frame]),
     {noreply, State};
 
 % @doc handle_info for unknown things
 handle_info(Msg, State) ->
-    error_logger:warning_msg("we are in undefined handle_info with message ~p\n",[Msg]),
+    ?warning("we are in undefined handle_info with message ~p\n",[Msg]),
     {noreply, State}.
 %-----------end of handle_info-------------
 
@@ -316,23 +312,23 @@ may_need_send_ping(#transport_state{
 connect(State = #transport_state{
         pusher_url = Pusher_url,
         timeout_for_gun_ws_upgrade = Timeout_for_gun_ws_upgrade}) ->
-    error_logger:info_msg("Erlpusher trying connect with state ~p", [State]),
+    ?info("Trying connect with state ~p", [State]),
     {ok, Pid} = gun:open("wss.pusherapp.com", 443, #{retry=>0}),
     GunMonRef = monitor(process, Pid),
     case gun:await_up(Pid, 5000, GunMonRef) of
         {ok, Protocol} ->
-            error_logger:info_msg("Erlpusher ~p connected to remote with protocol ~p",[Pid, Protocol]),
+            ?info("Gun ~p connected to remote with protocol ~p",[Pid, Protocol]),
             gun:ws_upgrade(Pid, Pusher_url, [], #{compress => true}),
             receive
                 {'gun_ws_upgrade', Pid, ok, _} ->
-                    error_logger:info_msg("Erlpusher ~p got gun_ws_upgrade",[Pid]),
-                    State#transport_state{gun_pid=Pid, gun_mon_ref=GunMonRef, connected_since = get_time()}
+                    ?info("Gun ~p got gun_ws_upgrade",[Pid]),
+                    State#transport_state{gun_pid = Pid, gun_mon_ref = GunMonRef, connected_since = get_time()}
             after Timeout_for_gun_ws_upgrade ->
-                error_logger:warning_msg("Erlpusher ~p got timeout_for_gun_ws_upgrade",[Pid]),
+                ?info("Gun ~p got timeout_for_gun_ws_upgrade",[Pid]),
                 flush_gun(State, Pid)
             end;
         {error, Reason} ->
-            error_logger:warning_msg("Some error in Erlpusher '~p' occur in gun during connection to pusher.com host",[Reason]),
+            ?warning("Some error in gun ~p occur in gun during connection to pusher.com host",[Pid, Reason]),
             flush_gun(State, Pid)
     end.
 
@@ -347,8 +343,8 @@ subscribe(State = #transport_state{channels = Channels, timeout_for_subscribtion
     NewState = may_need_connect(State),
     NewState#transport_state{channels = maps:map(
         fun
-            % cast connect for channels with status 'toconnect'
-            (Channel, #channel_prop{status = 'toconnect'} = ChannelProp) ->
+            % cast connect for channels with status 'to_connect'
+            (Channel, #channel_prop{status = 'to_connect'} = ChannelProp) ->
             case send(NewState, {text, <<"{\"event\": \"pusher:subscribe\", \"data\": {\"channel\": \"", Channel/binary, "\"} }">>}) of
                 true -> ChannelProp#channel_prop{status = 'casted', cast_sub = Time};
                 false -> ChannelProp
@@ -373,7 +369,7 @@ subscribe(State = #transport_state{channels = Channels}, Channel) when is_binary
                 true ->
                     NewState#transport_state{channels = Channels#{Channel => #channel_prop{status = 'casted', created = Time, cast_sub = Time}}};
                 false ->
-                    NewState#transport_state{channels = Channels#{Channel => #channel_prop{status = 'toconnect', created = Time}}}
+                    NewState#transport_state{channels = Channels#{Channel => #channel_prop{status = 'to_connect', created = Time}}}
             end;
         true ->
             State
@@ -418,7 +414,7 @@ flush_gun(State = #transport_state{gun_mon_ref = Gun_mon_ref, gun_pid = Gun_pid}
             State
     end.
 
-% @doc flush erlousher state
+% @doc flush transport state
 -spec flush_state(State) -> Result when
     State   :: transport_state(),
     Result  :: transport_state().
@@ -433,9 +429,9 @@ flush_state(State = #transport_state{channels = Channels, timeout_before_ping = 
             fun
                 % change state for channels with status 'casted' and 'connected'.
                 (_Channel, #channel_prop{status = 'casted'} = ChannelProp) ->
-                    ChannelProp#channel_prop{status = 'toconnect', cast_sub = 'undefined', get_sub_confirm = 'undefined'};
+                    ChannelProp#channel_prop{status = 'to_connect', cast_sub = 'undefined', get_sub_confirm = 'undefined'};
                 (_Channel, #channel_prop{status = 'connected'} = ChannelProp) ->
-                    ChannelProp#channel_prop{status = 'toconnect', cast_sub = 'undefined', get_sub_confirm = 'undefined'};
+                    ChannelProp#channel_prop{status = 'to_connect', cast_sub = 'undefined', get_sub_confirm = 'undefined'};
                 % for rest, do nothing
                 (_Channel, ChannelProp) ->
                     ChannelProp
@@ -456,44 +452,6 @@ flush_state(State = #transport_state{channels = Channels, timeout_before_ping = 
     Result :: 'milli_seconds' | pos_integer().
 get_time() ->
     erlang:system_time(milli_seconds).
-
-% @doc generate url
--spec generate_url(PusherAppId, PusherIdent) -> Result when
-    PusherAppId :: pusher_app_id(),
-    PusherIdent :: pusher_ident(),
-    Result      :: nonempty_list().
-
-generate_url(PusherAppId, PusherIdent) ->
-        lists:append(["/app/",PusherAppId,"?client=",PusherIdent,"&version=1.0&protocol=7"]).
-
-% @doc generate report topic
--spec generate_topic_if_need(State) -> Result when
-    State       :: transport_state(),
-    Result      :: report_to().
-
-generate_topic_if_need(#transport_state{report_to = 'erlroute', register = 'undefined'}) ->
-    {'erlroute', list_to_binary(pid_to_list(self())++".output")};
-generate_topic_if_need(#transport_state{report_to = 'erlroute', register = {_Type, Server}}) when is_atom(Server) ->
-    {'erlroute', list_to_binary(atom_to_list(Server)++".output")};
-generate_topic_if_need(#transport_state{report_to = 'erlroute', register = {'via', _Module, Server}}) when is_atom(Server) ->
-    {'erlroute', list_to_binary(atom_to_list(Server)++".output")};
-generate_topic_if_need(#transport_state{report_to = ReportTo}) ->
-    ReportTo.
-
-% @doc send output
--spec send_output(State, Frame) -> no_return() when
-    State :: transport_state(),
-    Frame :: erlpusher_frame().
-
-send_output(#transport_state{report_to = 'undefined'}, _Frame) -> ok;
-send_output(#transport_state{report_to = {'erlroute', Report_topic}, register = 'undefined'}, Frame) ->
-    erlroute:pub(?MODULE, self(), ?LINE, Report_topic, Frame, 'hybrid', '$erlroute_cmp_erlpusher');
-send_output(#transport_state{report_to = {'erlroute', Report_topic}, register = {_Type, Server}}, Frame) when is_atom(Server) ->
-    erlroute:pub(?MODULE, Server, ?LINE, Report_topic, Frame, 'hybrid', '$erlroute_cmp_erlpusher');
-send_output(#transport_state{report_to = {'erlroute', Report_topic}, register = {'via', _Module, Server}}, Frame) when is_atom(Server) ->
-    erlroute:pub(?MODULE, Server, ?LINE, Report_topic, Frame, 'hybrid', '$erlroute_cmp_erlpusher');
-send_output(_State = #transport_state{report_to=ReportTo}, Frame) ->
-    ReportTo ! Frame.
 
 % ------------------------ end of other private functions ----------------------
 
